@@ -52,26 +52,43 @@ This model can be applied to:
 
 - Data quality validation  
 - Product classification systems  
-- Market research  
+- Market research and pricing analysis  
 - Survey data auditing  
-- Pricing analysis  
+- Decision support systems  
 
 ---
 
 ## 🔐 Data Disclaimer
 
-The dataset has been anonymized. Sensitive variables were removed and numerical values were transformed to preserve confidentiality.
+The dataset used in this project has been anonymized. Sensitive variables were removed, and numerical values were transformed and standardized to preserve confidentiality while maintaining analytical integrity.
 
 ---
 
-## 🛠 Tools Used
+## 🛠 Tools & Technologies
 
-- R (tidyverse, dplyr, ggplot2)  
-- RMarkdown  
-- Statistical analysis  
-- Rule-based modeling  
+- R (tidyverse, dplyr, ggplot2, stringr)
+- RMarkdown
+- Data cleaning & preprocessing
+- Statistical analysis
+- Rule-based modeling 
 
 ---
 
 ## 📂 Project Structure
 
+├── bombillo.Rmd
+├── bombillo.html
+├── images/
+│ ├── price_distribution.png
+│ ├── outliers_boxplot.png
+│ ├── transition_matrix.png
+│ ├── model_results.png
+│ └── watts_distribution.png
+└── .gitignore
+
+---
+
+## 👨‍💻 Author
+
+**Gari Jerez**  
+Data Analyst | Economic & Statistical Modeling
