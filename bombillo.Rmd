@@ -1,0 +1,840 @@
+---
+title: "Light Bulb Classification Model Using Multi-Criteria Analysis in R"
+author: "Gari Jerez"
+date: "2026-04-01"
+output: 
+  html_document:
+    self_contained: true
+    toc: true
+    toc_float: true
+    toc_depht: 3
+    theme: cosmo
+---
+
+## Executive Summary
+
+This project develops a rule-based classification model to detect inconsistencies in product categorization using multi-criteria analysis.
+
+The model integrates statistical, textual, and technical variables to improve classification accuracy. A total of 17.13% of records were reclassified, highlighting structural inconsistencies in intermediate product categories.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.align = 'center')
+```
+
+```{r data, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(kableExtra)
+library(DT)
+library("tidyverse")
+library("readxl")
+library("openxlsx")
+library("stringdist")
+setwd("/Users/garya01/Downloads/bombillos") #linkfile
+#openfile
+incandescente <- read_xlsx("incandescente.xlsx", sheet = "Sheet1")
+led_10 <- read_xlsx("led_10.xlsx", sheet = "Sheet1")
+bajoconsumonoled <- read_xlsx("bajoconsumonoled.xlsx", sheet = "Sheet1")
+led_11 <- read_xlsx("led_11.xlsx", sheet = "Sheet1")
+```
+
+## Introduction
+
+The documented results were carried out based on the anomalies and discrepancies detected in the consultancy, related to the classification of light bulb varieties in the price survey database.
+
+Structural anomalies associated with:
+
+-   Incorrect ungrouping of varieties.
+-   Atypical differences in the price ranges collected.
+-   The non-coincidence of brands, technical characteristics and assigned variety.
+-   Presence of price ranges that do not correspond to the expected behavior of the declared variety.
+
+In particular, cases were identified where the brand and technical characteristics of the product were not consistent with the category in which it was registered. That is to say, if a 'Coral' brand light bulb whose price is 35 pesos is in the 'low consumption' variety, it does not correspond to said variety since the 'Coral' brand corresponds to the incandescent variety due to several characteristics:
+
+-   Yellow light
+-   Powers of 100 Watts
+-   Filament structure
+
+During the development of the analysis, several decision criteria were established conservatively that made it possible to identify the records whose evidence justified the reason for being reclassified.
+
+This document details in a summarized and technical way the entire process carried out to obtain the desired results, constituting added value both for the validation process, as well as the collection of prices in the field.
+
+## Results
+
+### Clean table with selected variables
+
+The dataset used in this project has been anonymized. Sensitive variables such as identifiers were removed to preserve confidentiality.
+
+Prices were cleaned and standardized using z-score normalization to ensure comparability across categories and prevent scale bias.
+
+```{r tables, echo=FALSE}
+#marcas
+cat_marcas <-c("3 UNION", "AMÉRICA", "SYLVANIA", "BEELIGHT", "BEST VALUE", "BRIGHT LIGHT",
+               "CONSUEG LIGHT", "CORAL", "DAILY", "DIESEL LIGHTS", "DOMUS", "KLASSICA",
+               "ELEKTRA", "LONGLIFE", "ESTRELLA", "FEDERAL", "FLY EAGLE", "GREENLIGHT",
+               "INLEC", "POKER", "LIDER", "MEGA LIGHT", "MERCURY", "NEWSTAR", "NIKKEI",
+               "OSRAM", "PHILIPS", "RCA", "ROOM ELECTRIC", "SKY LED", "STAR LUX", "TITAN",
+               "TRAMONTINA", "VOLTECK", "YACO", "ACE", "ANGEL LIGHT", "RUDO", "BIA",
+               "BRAVO", "CRUBEC", "LED BULB", "ECOLAMP", "EFFICIENT LED", "ELITE",
+               "ILUMIA", "XTRA LED", "EZ LIGHT", "HIKARU", "J TORCH", "LIGHT ROOM",
+               "LIGHT-TEC", "MAXI LIGHT", "NECO SOE", "RHEINKRAFT", "SEKURO",
+               "LED SPIRAL", "TECNOMASTER", "TOSUN LUX", "TOTAL", "TRIVO LUX",
+               "UTILITECH PRO", "VISTON", "VOLTAGE", "WADFOW", "WESTINGHOUSE",
+               "WIDEWELL", "AKSI LIGHTNIG", "BENELUX", "CHIYODA", "EUROLAMP",
+               "HOME ELEGANCE", "MASTER LIGHT", "PRICE CHOICE", "SUPER LIGHT", "TOSHIBA")
+#correccion
+correccion <- function(marca, umbral = 3) {
+  
+  if (is.na(marca)) return(NA_character_)
+  
+  d <- stringdist::stringdist(marca, cat_marcas)
+  
+  if (min(d) <= umbral) {
+    cat_marcas[which.min(d)]
+  } else {
+    NA_character_
+  }
+}
+#agregar la variable bombillo, eliminar los precios 11
+bombillos <- list(
+  bajoconsumonoled = bajoconsumonoled,
+  incandescente    = incandescente,
+  led_10           = led_10,
+  led_11           = led_11
+) %>%
+  imap(~ .x %>%
+         mutate(
+           bombillo = case_when(
+             .y == "bajoconsumonoled" ~ "Bajo consumo",
+             .y == "incandescente"    ~ "Incandescente",
+             .y == "led_10"           ~ "LED 0–10W",
+             .y == "led_11"           ~ "LED 11W+"
+           )
+         )
+  ) %>%
+  map(~ {
+    if ("ID_TIPO_PRECIO" %in% names(.x)) {
+      .x %>% filter(ID_TIPO_PRECIO != 11)
+    } else {
+      .x
+    }
+  })
+#para convertir en df
+#esto se usa para realizar el calculo de los que van y no 
+bombillos <- bind_rows(bombillos, .id = "tipo_origen")
+#normalizar base
+bombillos <- bombillos %>%
+  mutate(
+    tipo_origen = case_when(
+      tipo_origen %in% c("bajoconsumonoled") ~ "Bajo consumo",
+      tipo_origen %in% c("incandescente") ~ "Incandescente",
+      tipo_origen %in% c("led_10") ~ "LED 0–10W",
+      tipo_origen %in% c("led_11") ~ "LED 11W+",
+      TRUE ~ tipo_origen
+    )
+  ) 
+
+#final
+df_final <- bombillos %>%
+  mutate(
+    MARCA_CORREGIDA = ifelse(
+      MARCA %in% cat_marcas,
+      MARCA,
+      map_chr(MARCA, correccion)
+    )
+  ) %>%
+  select(
+    tipo_origen,
+    MARCA,
+    PRECIO,
+    OBSERVACION,
+    MARCA_CORREGIDA
+  )
+#tabla resultado
+datatable(
+  df_final,
+  filter = "top",
+  extensions = "Buttons",
+  options = list(
+    pageLength = 15,
+    scrollX = TRUE,
+    dom = "t",
+    autoWidth = TRUE
+  ),
+  caption = "Normalized preview list with the variables used in the calculation"
+)
+```
+
+### Exploratory analysis and detection of outliers
+
+### Statistical table by variety
+
+```{r segmentacion_estadistica, echo=FALSE}
+
+#normalizacion
+df_final <- df_final %>%
+  mutate(
+    PRECIO = readr::parse_number(as.character(PRECIO))
+  ) %>%
+  filter(!is.na(PRECIO)) %>%
+  mutate(
+    PRECIO = scale(PRECIO)[,1]
+  )
+#stats descriptivos de los datos 
+stats_variedades <- df_final %>%
+  group_by(tipo_origen) %>%
+  summarise(
+    Total = n(),
+    Mediana = median(PRECIO, na.rm = TRUE),
+    Q1 = quantile(PRECIO, 0.25, na.rm = TRUE),
+    Q3 = quantile(PRECIO, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1
+  )
+
+DT::datatable(
+  stats_variedades,
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10,
+    scrollX = TRUE,
+    dom = "t"
+  ),
+  caption = "Descriptive statistics by variety"
+)
+```
+
+```{r price_distribution, echo=FALSE, fig.cap="Figure 1. Price Distribution by Product Category"}
+
+p1 <- ggplot(df_final, aes(x = PRECIO, fill = tipo_origen)) +
+  geom_histogram(bins = 30, alpha = 0.6) +
+  facet_wrap(~tipo_origen, scales = "free") +
+  theme_minimal() +
+  labs(
+    title = "Price Distribution by Category",
+    x = "Standardized Price",
+    y = "Frequency"
+  )
+
+p1
+
+ggsave("images/price_distribution.png", plot = p1, width = 8, height = 5)
+```
+
+### Atypical values according to their variety
+
+```{r deteccion_valores_atipicos, echo=FALSE}
+
+novan <- df_final %>%
+  group_by(tipo_origen) %>%
+  mutate(
+    Q1 = quantile(PRECIO, 0.25, na.rm = TRUE),
+    Q3 = quantile(PRECIO, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    limite_inferior = Q1 - 1.5 * IQR,
+    limite_superior = Q3 + 1.5 * IQR,
+    flag_outlier = ifelse(
+      PRECIO < limite_inferior | PRECIO > limite_superior,
+      1, 0
+    )
+  ) %>%
+  ungroup()
+
+tabla_outliers <- novan %>%
+  group_by(tipo_origen) %>%
+  summarise(
+    Total = n(),
+    Outliers = sum(flag_outlier),
+    Porcentaje = paste0(round(100 * Outliers / Total, 2), "%")
+  ) %>%
+  arrange(desc(Outliers))
+
+DT::datatable(
+  tabla_outliers,
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10,
+    scrollX = TRUE,
+    dom = "t"
+  ),
+  caption = "Detection of outliers by variety"
+)
+
+```
+
+```{r outliers_boxplot, echo=FALSE, fig.cap="Figure 2. Outlier Detection by Category"}
+
+p2 <- ggplot(novan, aes(x = tipo_origen, y = PRECIO, fill = tipo_origen)) +
+  geom_boxplot(alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Outlier Detection by Category",
+    x = "Category",
+    y = "Standardized Price"
+  )
+
+p2
+
+ggsave("images/outliers_boxplot.png", plot = p2, width = 8, height = 5)
+```
+
+### Construction of the classification model
+
+#### Correction of brands
+
+It was necessary to make corrections to the sample marks for standardization with the aim of unifying spelling variations and ensuring consistency in the analysis by manufacturer.
+
+```{r correccion_marcas, echo=FALSE}
+
+df_final <- df_final %>%
+  mutate(
+    MARCA_CORREGIDA = ifelse(
+      MARCA %in% cat_marcas,
+      MARCA,
+      map_chr(MARCA, correccion)
+    )
+  )
+
+tabla_marcas <- df_final %>%
+  count(MARCA_CORREGIDA, sort = TRUE)
+
+DT::datatable(
+  tabla_marcas,
+  options = list(pageLength = 10, scrollX = TRUE),
+  caption = "Frequency of brands corrected"
+)
+```
+
+#### Specific segmentation of Incandescents out of range
+
+```{r incandescentes_fuera_rango, echo=FALSE}
+novan %>%
+  group_by(tipo_origen) %>%
+  summarise(
+    total = n(),
+    outliers = sum(flag_outlier),
+    porcentaje = round(100*outliers/total,2)
+  ) %>%
+  arrange(desc(porcentaje))
+#analizar incadecentes que estan fuera de los rangos de precio 
+inc_sospechosos <- novan %>%
+  filter(tipo_origen == "Incandescente",
+         flag_outlier == 1)
+#comparar precios par aver la mediana
+novan %>%
+  filter(grepl("LED", tipo_origen)) %>%
+  summarise(mediana_led = median(PRECIO, na.rm = TRUE))
+# DT
+DT::datatable(
+  inc_sospechosos %>%
+    select(MARCA_CORREGIDA,
+           PRECIO,
+           limite_inferior,
+           limite_superior),
+  options = list(pageLength = 10, scrollX = TRUE),
+  caption = "Incandescents outside the expected statistical range"
+)
+```
+
+#### Determination of dominant variety by brand
+
+By segmenting the data by sample prices, a comparison was made by price proximity in which it is observed that certain brands present a high unique concentration of variety, after estimating the relative proportion
+
+Of brands according to their origin. which constitutes a robust empirical criterion for validating reclassification processes.
+
+```{r marca_dominante, echo=FALSE}
+
+#deteccion y reclasificacion
+stats_variedades <- novan %>%
+  group_by(tipo_origen) %>%
+  summarise(
+    mediana = median(PRECIO, na.rm = TRUE),
+    Q1 = quantile(PRECIO, 0.25, na.rm = TRUE),
+    Q3 = quantile(PRECIO, 0.75, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  dplyr::rename(tipo_ref = tipo_origen)
+#comparaciones de las variedades con todas 
+df_comp <- df_final %>%
+  crossing(stats_variedades) %>%
+  mutate(distancia = abs(PRECIO - mediana))
+
+#variedades cerca segun su precio 
+tipo_estimado <- df_comp %>%
+  group_by(PRECIO) %>%
+  slice_min(distancia, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  select(
+    PRECIO,
+    bombillo_real = tipo_origen,
+    bombillo_estimado = tipo_ref
+  )
+#proporcion por marca 
+perfil_marca <- df_final %>%
+  group_by(MARCA_CORREGIDA, tipo_origen) %>%
+  summarise(n = n(), .groups="drop") %>%
+  group_by(MARCA_CORREGIDA) %>%
+  mutate(prop = n/sum(n)) %>%
+  filter(prop == max(prop))
+
+#categoria dominante 
+marca_dominante <- perfil_marca %>%
+  group_by(MARCA_CORREGIDA) %>%
+  arrange(desc(prop)) %>%
+  slice(1) %>%   # toma solo la primera
+  ungroup() %>%
+  select(MARCA_CORREGIDA, 
+         bombillo_dominante = tipo_origen, 
+         prop)
+
+df_final <- df_final %>%
+  left_join(marca_dominante, by = "MARCA_CORREGIDA")
+
+DT::datatable(
+  marca_dominante,
+  options = list(pageLength = 10, scrollX = TRUE),
+  caption = "Dominant variety by brand"
+)
+```
+
+#### Technological ambiguity and overlap
+
+While the model was being developed, it was observed that there is an area where LED and low consumption (CFL) lamps overlap, especially between 9 and 23W. In that range, both can have very similar powers and similar prices, which makes it difficult to differentiate them if you only look at one variable.
+
+This coincidence generates a certain ambiguity in the classification. For this reason, a more complete approach was chosen: a multi-criteria system that combines different elements, such as power, textual information, behavior by brand and consistency in prices.
+
+### Extraction of (watts) from observation
+
+Statistical summary of the quantities of watts extracted from observation:
+
+```{r extraccion_watts, echo=FALSE}
+# Limpieza del texto
+df_final <- df_final %>%
+  mutate(
+    OBS_LIMPIA = str_to_lower(OBSERVACION),
+    OBS_LIMPIA = str_replace_all(OBS_LIMPIA, "[^a-z0-9 ]", "")
+  )
+
+# Extracción robusta de watts
+df_final <- df_final %>%
+  mutate(
+    watts_extraido = str_extract(OBS_LIMPIA, "\\d+\\s*(w|watts|wts)?"),
+    watts_extraido = str_extract(watts_extraido, "\\d+"),
+    watts_extraido = as.numeric(watts_extraido)
+  )
+
+summary(df_final$watts_extraido)
+```
+
+```{r watts_distribution, echo=FALSE, fig.cap="Figure 5. Distribution of Extracted Watts"}
+
+p5 <- ggplot(df_final, aes(x = watts_extraido)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Extracted Watts",
+    x = "Watts",
+    y = "Frequency"
+  )
+
+p5
+
+ggsave("images/watts_distribution.png", plot = p5, width = 8, height = 5)
+```
+
+Extracted cases:
+
+```{r tabla_watts, echo=FALSE}
+
+tabla_watts <- df_final %>%
+  filter(!is.na(watts_extraido)) %>%
+  select(
+    tipo_origen,
+    MARCA_CORREGIDA,
+    OBSERVACION,
+    watts_extraido,
+    PRECIO
+  )
+
+DT::datatable(
+  tabla_watts,
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10,
+    scrollX = TRUE,
+    dom = "t"
+  ),
+  caption = "Power extraction (watts) from observation"
+)
+```
+
+Percentage of records containing identified watts:
+
+```{r cobertura_watts, echo=FALSE}
+
+cobertura_watts <- df_final %>%
+  summarise(
+    Total = n(),
+    Con_watts = sum(!is.na(watts_extraido)),
+    Porcentaje = round(100 * Con_watts / Total, 2)
+  )
+
+cobertura_watts
+```
+
+Percentage of records that contain identified watts Through the automatic extraction of power from the bulbs, it generates added value in the intermediate criterion analysis because it allows the specific watts of each registered trademark to be identified.
+
+### Preliminary technical classification
+
+```{r clasificacion_tecnica_preliminar, echo=FALSE}
+
+#limpieza y extraccion de w
+df_final <- df_final %>%
+  mutate(
+    OBS_LIMPIA = str_to_lower(OBSERVACION),
+    OBS_LIMPIA = str_replace_all(OBS_LIMPIA, "[^a-z0-9 ]", ""),
+    watts_extraido = str_extract(OBS_LIMPIA, "\\d+\\s*(w|watts|wts)?"),
+    watts_extraido = str_extract(watts_extraido, "\\d+"),
+    watts_extraido = as.numeric(watts_extraido)
+  )
+
+#clasificacion por potencia
+df_final <- df_final %>%
+  mutate(
+    tipo_por_watts = case_when(
+      watts_extraido >= 40 ~ "Incandescente",
+      watts_extraido <= 10 ~ "LED 0–10W",
+      watts_extraido > 10 & watts_extraido < 40 ~ "Bajo consumo",
+      TRUE ~ NA_character_
+    )
+  )
+
+#Detección detallada de texto
+df_final <- df_final %>%
+  mutate(
+    tipo_texto = case_when(
+      str_detect(OBS_LIMPIA, "\\bled\\b") ~ "LED 0–10W",
+      str_detect(OBS_LIMPIA, "bajo consumo|cfl|ahorrador") ~ "Bajo consumo",
+      str_detect(OBS_LIMPIA, "incandescente|filamento") ~ "Incandescente",
+      TRUE ~ NA_character_
+    )
+  )
+
+#tabla final
+DT::datatable(
+  df_final %>%
+    select(tipo_origen, tipo_por_watts, tipo_texto, watts_extraido, PRECIO) %>%
+    head(100),
+  options = list(pageLength = 10, scrollX = TRUE),
+  caption = "Preliminary technical classification based on power and text"
+)
+```
+
+### Multicriteria Scoring System
+
+A cumulative scoring system was implemented that assigns differentiated weights according to technical (power), semantic (observation text) and structural (consistency by brand) evidence. This scheme allows us to evaluate the relative strength of each possible classification.
+
+```{r sistema_puntuacion, echo=FALSE}
+
+#puntajes iniciales
+df_final <- df_final %>%
+  mutate(
+    score_inc   = 0,
+    score_cfl   = 0,
+    score_led10 = 0,
+    score_led11 = 0
+  )
+
+#puntajes por potencia
+df_final <- df_final %>%
+  mutate(
+    score_inc   = score_inc   + ifelse(!is.na(watts_extraido) & watts_extraido >= 40, 3, 0),
+    score_led10 = score_led10 + ifelse(!is.na(watts_extraido) & watts_extraido <= 10, 3, 0),
+    score_led11 = score_led11 + ifelse(!is.na(watts_extraido) & watts_extraido >= 11 & watts_extraido <= 25, 2, 0),
+    score_cfl   = score_cfl   + ifelse(!is.na(watts_extraido) & watts_extraido >= 9 & watts_extraido <= 23, 2, 0)
+  )
+
+#puntaje por texto
+df_final <- df_final %>%
+  mutate(
+    score_led10 = score_led10 + ifelse(str_detect(OBS_LIMPIA, "led"), 3, 0),
+    score_cfl   = score_cfl   + ifelse(str_detect(OBS_LIMPIA, "espiral|ahorrador"), 3, 0),
+    score_inc   = score_inc   + ifelse(str_detect(OBS_LIMPIA, "filamento"), 2, 0)
+  )
+
+
+#puntaje por consistencia de las marcas (proporcion de peso por marcas)
+df_final <- df_final %>%
+  mutate(
+    score_inc   = score_inc   + ifelse(bombillo_dominante == "Incandescente" & prop >= 0.8, 2, 0),
+    score_cfl   = score_cfl   + ifelse(bombillo_dominante == "Bajo consumo" & prop >= 0.8, 2, 0),
+    score_led10 = score_led10 + ifelse(bombillo_dominante == "LED 0–10W" & prop >= 0.8, 2, 0),
+    score_led11 = score_led11 + ifelse(bombillo_dominante == "LED 11W+" & prop >= 0.8, 2, 0)
+  )
+#tabla 
+tabla_scores <- df_final %>%
+  select(
+    tipo_origen,
+    watts_extraido,
+    bombillo_dominante,
+    prop,
+    score_inc,
+    score_cfl,
+    score_led10,
+    score_led11
+  )
+
+DT::datatable(
+  tabla_scores,
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10,
+    scrollX = TRUE,
+    dom = "t"
+  ),
+  caption = "Multi-criteria scoring system per record"
+)
+```
+
+### Final Classification with Safety Margin
+
+This allows reclassification when there is a sufficient difference between the best and the second best category.
+
+```{r clasificacion_final, echo=FALSE}
+
+df_final <- df_final %>%
+  rowwise() %>%
+  mutate(
+    
+    max_score = max(c(score_inc, score_cfl, score_led10, score_led11)),
+    
+    segundo_score = sort(
+      c(score_inc, score_cfl, score_led10, score_led11),
+      decreasing = TRUE
+    )[2],
+    
+    diferencia = max_score - segundo_score,
+    
+    tipo_calculado = case_when(
+  max_score == 0 ~ NA_character_,
+  length(unique(c(score_inc, score_cfl, score_led10, score_led11))) == 1 ~ NA_character_,
+  TRUE ~ c("Incandescente","Bajo consumo","LED 0–10W","LED 11W+")[
+    which.max(c(score_inc, score_cfl, score_led10, score_led11))
+  ]
+),
+    
+    tipo_final = case_when(
+      max_score == 0 ~ "Revisar",
+      diferencia >= 2 ~ tipo_calculado,
+      TRUE ~ tipo_origen
+    )
+    
+  ) %>%
+  ungroup() %>%
+  mutate(
+    cambio = ifelse(tipo_final != tipo_origen,
+                    "Reclasificar",
+                    "Mantener")
+  )
+
+#tabla 
+casos_reclasificados <- df_final %>%
+  filter(cambio == "Reclasificar") %>%
+  select(
+    MARCA,
+    tipo_origen,
+    tipo_final,
+    diferencia,
+    watts_extraido,
+    PRECIO,
+    bombillo_dominante,
+    prop,
+    score_inc,
+    score_cfl,
+    score_led10,
+    score_led11
+  )
+
+DT::datatable(
+  casos_reclasificados,
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10,
+    scrollX = TRUE,
+    dom = "t"
+  ),
+  caption = "Records reclassified by the multi-criteria system"
+)
+
+```
+
+Model summary:
+
+The multi-criteria scoring system ended up reclassifying 17.13% of the records analyzed (241 out of 1,407), which shows that there were several technical inconsistencies in the original classification.
+
+In simple terms, this means that about one in six records had enough signals to warrant a review.
+
+Anyway, the adjustment level is not that high. Rather, it suggests that the model acts quite cautiously, making changes only when the evidence really supports it and exceeds a minimum of safety.
+
+```{r resumen_modelo, echo=FALSE}
+resumen_modelo <- df_final %>%
+  summarise(
+    Total = n(),
+    Reclasificados = sum(cambio == "Reclasificar"),
+    Porcentaje = round(100 * Reclasificados / Total, 2)
+  )
+
+DT::datatable(
+  resumen_modelo,
+  options = list(dom = "t"),
+  caption = "General impact of the classification model"
+)
+```
+
+```{r model_results, echo=FALSE, fig.cap="Figure 4. Model Reclassification Impact"}
+
+p4 <- df_final %>%
+  count(cambio) %>%
+  ggplot(aes(x = cambio, y = n, fill = cambio)) +
+  geom_col() +
+  theme_minimal() +
+  labs(
+    title = "Reclassification Impact",
+    x = "Decision",
+    y = "Number of Records"
+  )
+
+p4
+
+ggsave("images/model_results.png", plot = p4, width = 6, height = 4)
+```
+
+### Structural Analysis by Variety
+
+The analysis by type of product makes it clear that reclassification does not occur evenly between all categories. The following table shows the adjustments made to where the problem of the article lies according to its variety:
+
+```{r impacto_variedad, echo=FALSE}
+
+impacto_variedad <- df_final %>%
+  group_by(tipo_origen) %>%
+  summarise(
+    Total = n(),
+    Reclasificados = sum(cambio == "Reclasificar"),
+    Porcentaje = round(100 * Reclasificados / Total, 2)
+  ) %>%
+  arrange(desc(Porcentaje))
+
+DT::datatable(
+  impacto_variedad,
+  extensions = "Buttons",
+  options = list(
+    pageLength = 10,
+    scrollX = TRUE,
+    dom = "t"
+  ),
+  caption = "Impact of the model by original variety"
+)
+```
+
+Most of the changes made are concentrated in **low consumption**, with **44.95 %** of the records reclassified. Which suggests that there is a technical overlap between the bulbs made of LED and low consumption coinciding in various ranges of watts, especially 9 and 23 watts.
+
+In this context, the price alone is not enough to differentiate well between one and the other, since both can handle quite similar values in the market.
+
+This kind of "gray zone" is what helps explain why the Low Consumption category has such a high reclassification rate.
+
+In second place is **LED 11W+**, with **25.93 %**, suggesting that there may be some confusion in how the intermediate power ranges are being defined.
+
+On the other hand, categories such as **LED 0--10W** **(9.76 %)** and **Incandescent** **(3.70 %)** remain much more stable. There seems to be quite a bit of consistency between power, price and available information.
+
+Together, these results show that the model does not apply random changes, but rather focuses on the categories where there is the most technical ambiguity, avoiding touching those that are already consistent.
+
+### Transition Matrix between Original and Final Classification
+
+The transition matrix makes it clear that reclassifications do not occur at random, but rather follow fairly coherent patterns from a technological point of view:
+
+```{r matriz_transicion, echo=FALSE}
+
+matriz_transicion <- df_final %>%
+  count(tipo_origen, tipo_final) %>%
+  tidyr::pivot_wider(
+    names_from = tipo_final,
+    values_from = n,
+    values_fill = 0
+  )
+
+DT::datatable(
+  matriz_transicion,
+  extensions = "Buttons",
+  options = list(
+    scrollX = TRUE,
+    pageLength = 10,
+    dom = "t"
+  ),
+  caption = "Transition matrix: original classification vs final classification"
+)
+```
+
+For example, the "Low consumption" category shows a significant shift towards LED technologies, with 95 registers moving to LED 0--10W and LED 11W+. This fits with what had already been observed: there is an overlap in the intermediate power ranges (9--23W) that generates confusion.
+
+On the other hand, the Incandescent category hardly moves. It maintains a 96.3% permanence, which indicates that it is quite solid and that the model is not forcing unnecessary changes.
+
+Together, these results suggest that the multi-criteria system acts precisely, correcting specific inconsistencies without generally altering the rest of the classifications.
+
+```{r transition_plot, echo=FALSE, fig.cap="Figure 3. Transition Between Original and Final Classification"}
+
+p3 <- ggplot(df_final, aes(x = tipo_origen, fill = tipo_final)) +
+  geom_bar(position = "fill") +
+  theme_minimal() +
+  labs(
+    title = "Transition Between Original and Final Classification",
+    x = "Original Category",
+    y = "Proportion",
+    fill = "Final Category"
+  )
+
+p3
+
+ggsave("images/transition_matrix.png", plot = p3, width = 8, height = 5)
+```
+
+### Economic Validation by Final Classification
+
+Economic validation shows that there is consistency between technology type and price levels:
+
+```{r validacion_economica, echo=FALSE}
+
+validacion_precio <- df_final %>%
+  group_by(tipo_final) %>%
+  summarise(
+    Total = n(),
+    Mediana = median(PRECIO, na.rm = TRUE),
+    Promedio = mean(PRECIO, na.rm = TRUE),
+    Q1 = quantile(PRECIO, 0.25, na.rm = TRUE),
+    Q3 = quantile(PRECIO, 0.75, na.rm = TRUE)
+  ) %>%
+  arrange(desc(Mediana))
+
+DT::datatable(
+  validacion_precio,
+  extensions = "Buttons",
+  options = list(
+    scrollX = TRUE,
+    dom = "t"
+  ),
+  caption = "Price statistics by final ranking"
+)
+```
+
+LED lamps appear with the highest price medians, followed by low consumption lamps, while incandescent lamps remain at the lowest level.
+
+This order makes sense from a technological and market point of view, reinforcing the idea that the reclassification system is working consistently.
+
+### Conclusions
+
+The multi-criteria scoring system ended up reclassifying 17.13% of the records analyzed (241 out of 1,407), which makes it clear that there were some technical inconsistencies in the original classification.
+
+Most of these adjustments were concentrated in the "Low consumption" category, confirming that the problem was quite focused on areas where different technologies overlap.
+
+At the same time, the model behaved prudently, applying changes only when the difference between categories was clear enough to exceed a minimum safety threshold.
+
+Furthermore, by reviewing both the structure and prices, it is seen that the methodology improves overall consistency without generating unnecessary changes in categories that were already stable.
